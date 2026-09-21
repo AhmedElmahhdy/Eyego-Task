@@ -13,7 +13,7 @@ dotenv.config();
 const app = express();
 const port = process.env.API_PORT || process.env.PORT;
 const mongoUri = process.env.MONGODB_URI ;
-console.log(mongoUri)
+
 await mongoose.connect(mongoUri);
 
 
