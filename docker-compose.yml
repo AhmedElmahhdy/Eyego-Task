@@ -1,0 +1,81 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: eyego-kafka
+    ports:
+      - '9092:9092'
+    environment:
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  mongo:
+    image: mongo:7
+    container_name: eyego-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+
+  activity-producer:
+    build:
+      context: .
+      dockerfile: apps/activity-producer/Dockerfile
+    container_name: eyego-producer
+    depends_on:
+      - kafka
+    environment:
+      PORT: 3002
+      KAFKA_BROKERS: kafka:9092
+      NODE_ENV: development
+    ports:
+      - '3002:3002'
+
+  activity-processor:
+    build:
+      context: .
+      dockerfile: apps/activity-processor/Dockerfile
+    container_name: eyego-processor
+    depends_on:
+      - kafka
+      - mongo
+    environment:
+      PORT: 3003
+      KAFKA_BROKERS: kafka:9092
+      MONGODB_URI: mongodb://admin:password@mongo:27017/activity_platform?authSource=admin
+      NODE_ENV: development
+
+  activity-api:
+    build:
+      context: .
+      dockerfile: apps/activity-api/Dockerfile
+    container_name: eyego-api
+    depends_on:
+      - mongo
+      - kafka
+    environment:
+      PORT: 3001
+      MONGODB_URI: mongodb://admin:password@mongo:27017/activity_platform?authSource=admin
+      KAFKA_BROKERS: kafka:9092
+      NODE_ENV: development
+    ports:
+      - '3001:3001'
+
+volumes:
+  mongo_data:

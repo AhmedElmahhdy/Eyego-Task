@@ -1,0 +1,25 @@
+{
+  "name": "eyego-activity-stream",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Event-driven user activity processing stack with Kafka, MongoDB, and Express using ES modules.",
+  "scripts": {
+    "producer": "node apps/activity-producer/src/server.js",
+    "processor": "node apps/activity-processor/src/server.js",
+    "api": "node apps/activity-api/src/server.js",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down -v"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "joi": "^17.6.0",
+    "kafkajs": "^2.2.4",
+    "mongoose": "^8.5.3",
+    "morgan": "^1.10.0",
+    "uuid": "^10.0.0"
+  }
+}
