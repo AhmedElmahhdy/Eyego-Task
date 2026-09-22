@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eyego-config
+  namespace: eyego-activity
+data:
+  KAFKA_BROKERS: "kafka:9092"
+  KAFKA_TOPIC_USER_ACTIVITY: "user-activity"
+  KAFKA_CONSUMER_GROUP: "activity-processor"
+  MONGODB_URI: "mongodb://admin:password@mongo:27017/activity_platform?authSource=admin"
+  NODE_ENV: "production"
