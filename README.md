@@ -1,193 +1,111 @@
 # Eyego Activity Stream
 
-This repository contains a practical MVP for an event-driven user activity processing pipeline using Node.js, Kafka, MongoDB, and Express.
+This project is a small event-driven platform for capturing, processing, and querying user activity events. It demonstrates how a producer service can accept activity events, publish them to Kafka, let a processor service store them in MongoDB, and expose a read API for querying those records.
 
-## 1. DDD and architecture
+The purpose of the task is to show a simple but realistic flow:
 
-### Bounded contexts
+1. A client sends a user activity event.
+2. The producer validates and publishes it to Kafka.
+3. The processor consumes the Kafka message.
+4. The processor saves a processed activity log to MongoDB.
+5. The API returns activity records with filtering, sorting, and pagination.
 
-- User Activity Capture: receives user events from web/mobile apps and emits domain events.
-- Activity Processing: consumers validate, enrich, and persist processed log entries.
-- Activity Query API: exposes read-models for dashboards and audits.
+---
 
-### Domain objects
+## Project goal
 
-- UserActivity: the emitted event from the client side, representing a single user action.
-- ActivityProcessed: the persisted processed log entry used by query and analytics services.
+The repository models a minimal activity stream system using:
 
-### Layered structure
+- Node.js
+- Express
+- Kafka
+- MongoDB
+- Docker Compose
 
-- domain: immutable value objects, event types, aggregates, validation rules.
-- application: use cases such as `ActivityLogService` and `ActivityQueryService`.
-- infrastructure: Kafka producer/consumer, MongoDB repository, env config, logging.
+It is structured around a simple layered design inspired by Domain-Driven Design.
 
-> This split keeps the domain logic independent from transport concerns and makes future changes to Kafka or MongoDB safer.
+---
 
-## 2. Kafka integration
+## Architecture overview
 
-### Event flow
-
-1. Producer accepts POST /api/v1/activities.
-2. Producer converts the request into a `UserActivity` payload.
-3. Kafka topic `user-activity` receives the event.
-4. Consumer group `activity-processor` reads the message.
-5. Repository writes durable processed records to MongoDB.
-
-### Delivery semantics
-
-- At-least-once is the baseline design for Kafka consumers.
-- The processor uses a business idempotency key (`eventId`) to ensure duplicate messages do not create duplicate records.
-- Retries use exponential backoff with bounded retries and dead-letter-topic or retry-topic strategy for unrecoverable messages.
-
-### Failure handling
-
-- Producer failure: return 503 and keep retry logic on the client side.
-- Kafka outage: fail fast for write requests; use queue backpressure and a retry queue.
-- Consumer failure: process exceptions trigger retry; duplicate message handling is guarded by `eventId`.
-
-## 3. Data persistence and MongoDB
-
-### Schema shape
-
-```js
-const activityLogSchema = new mongoose.Schema({
-  eventId: { type: String, required: true, unique: true, index: true },
-  userId: { type: String, required: true, index: true },
-  activityType: { type: String, required: true, index: true },
-  timestamp: { type: Date, required: true, index: true },
-  source: { type: String, default: 'web' },
-  metadata: { type: Object, default: {} },
-  status: { type: String, default: 'processed' },
-  expiresAt: { type: Date, required: true, index: { expireAfterSeconds: 0 } }
-}, { timestamps: true });
+```text
+Client / Browser / App
+        |
+        v
+activity-producer
+        |
+        | POST /api/v1/activities
+        v
+Kafka topic: user-activity
+        |
+        v
+activity-processor
+        |
+        v
+MongoDB collection: activitylogs
+        |
+        v
+activity-api
+        |
+        | GET /api/v1/activity-logs
+        v
+Dashboard / Audit UI / Consumers
 ```
 
-### Index strategy
+### Components
 
-- userId
-- activityType
-- timestamp
-- compound index: `{ userId: 1, activityType: 1, timestamp: -1 }`
-- TTL index on `expiresAt` for retention/cleanup
+- activity-producer:
+  - accepts HTTP requests
+  - validates input
+  - creates a `UserActivity` event
+  - sends it to Kafka
 
-### Archival strategy
+- activity-processor:
+  - subscribes to `user-activity`
+  - prevents duplicates using `eventId`
+  - writes processed records to MongoDB
 
-- Keep hot data for 30-90 days in MongoDB.
-- Archive older records into cold storage, e.g., Parquet on GCS/S3 or a data lake.
-- Use scheduled exports or a daily ETL pipeline.
+- activity-api:
+  - exposes query endpoints
+  - reads activity data from MongoDB
+  - supports filtering, pagination, and sorting
 
-## 4. API design
+---
 
-### REST endpoints
+## Domain concepts
 
-- POST /api/v1/activities
-- GET /api/v1/activity-logs?page=1&size=20&userId=123&activityType=login&startDate=2026-01-01&endDate=2026-01-31&sort=-timestamp&fields=userId,activityType,timestamp
-- GET /health
+### UserActivity
+This is the event emitted by the client or producer when a user performs an action such as login, purchase, page view, or logout.
 
-### Query semantics
+### ActivityLog
+This is the saved record in MongoDB after the processor consumes the event and stores it.
 
-- page: page number, default 1
-- size: page size, default 20, capped at 100
-- filters: userId, activityType, startDate, endDate
-- sort: comma-delimited field names with optional `-` prefix
-- fields: comma-delimited projection list
+### Idempotency
+The system uses `eventId` to avoid inserting the same event twice. The processor checks whether the event already exists before creating a new DB record.
 
-### Security notes
+---
 
-- Add auth middleware for production using JWT or mTLS.
-- Use `helmet`, `express-rate-limit`, and strict CORS policy.
-- Validate all incoming payloads with Joi.
-
-## 5. Deployment and orchestration
-
-### Docker and local dev
-
-Run the project locally with:
-
-```bash
-npm install
-npm run docker:up
-npm run api
-npm run processor
-npm run producer
-```
-
-The Docker compose stack starts Kafka, Zookeeper, and MongoDB. The app services are then built and run locally with environment variables from `.env`.
-
-### Kubernetes
-
-The project includes manifests under `k8s/` for:
-
-- Namespace
-- ConfigMap
-- Secret
-- Deployments
-- Services
-
-### Cloud options
-
-- GKE: best if you want Google-managed autoscaling and managed Kafka via Confluent or a managed queue.
-- EKS: strong AWS ecosystem compatibility.
-- AKS: good for Azure-native integrations and private networking.
-
-Recommended baseline limits:
-
-- API: 250m CPU / 256Mi memory, HPA target 70% CPU
-- Processor: 500m CPU / 512Mi memory, HPA target 60% CPU
-- MongoDB: 1Gi storage, persistent volume claims
-
-## 6. NFRs and observability
-
-### Observability
-
-- Structured logs with JSON logging fields: timestamp, service, level, userId, correlationId.
-- Distributed tracing using OpenTelemetry.
-- Metrics via Prometheus exporters for Kafka lag, HTTP latency, DB query latency, and message processing errors.
-
-### Health checks
-
-- /health on all services
-- readiness and liveness endpoints for k8s probes
-- dead-letter monitoring and circuit breakers for Kafka producer failure
-
-### Idempotency and exactly-once
-
-- At least once is expected at the message layer.
-- Exactly-once can be approximated with transactional writes and dedupe keys when using a single DB transaction per message. In practice, idempotent persistence is the most robust pattern.
-
-### Testing strategy
-
-- Unit tests for domain validation and mapping logic
-- Integration tests for Kafka and MongoDB behavior
-- Contract tests for API response shapes and pagination
-
-## 7. Deliverables and file layout
+## Project structure
 
 ```text
 .
 ├── apps/
 │   ├── activity-api/
-│   │   ├── Dockerfile
 │   │   └── src/
 │   │       └── server.js
 │   ├── activity-processor/
-│   │   ├── Dockerfile
 │   │   └── src/
-│   │       ├── server.js
-│   │       └── activity-consumer.js
+│   │       └── server.js
 │   └── activity-producer/
-│       ├── Dockerfile
 │       └── src/
 │           └── server.js
 ├── libs/
 │   ├── application/
 │   │   └── src/
-│   │       ├── activity-log-service.js
-│   │       └── activity-query-service.js
+│   │       └── activity-log-service.js
 │   ├── domain/
 │   │   └── src/
-│   │       ├── user-activity.js
-│   │       └── activity-processed.js
+│   │       └── user-activity.js
 │   └── infrastructure/
 │       └── src/
 │           ├── kafka/
@@ -195,49 +113,259 @@ Recommended baseline limits:
 │           └── mongo/
 │               └── activity-log.repository.js
 ├── k8s/
-│   ├── namespace.yaml
-│   ├── configmap.yaml
-│   ├── secret.yaml
 │   ├── api-deployment.yaml
+│   ├── configmap.yaml
+│   ├── namespace.yaml
 │   ├── processor-deployment.yaml
+│   ├── secret.yaml
 │   └── service.yaml
-├── .env.example
-├── .gitignore
 ├── docker-compose.yml
 ├── package.json
 ├── README.md
-└── tests/
-    └── user-activity.test.js
+└── .gitignore
 ```
 
-## 8. MVP and enhancements
+---
 
-### Phase 1: MVP
+## Prerequisites
 
-- Producer emits events to Kafka.
-- Consumer persists to MongoDB.
-- API reads activity logs with filtering and pagination.
-- Basic health checks and Docker local setup.
+Before running the project, make sure you have:
 
-### Phase 2: Enhancements
+- Node.js 18+
+- npm
+- Docker and Docker Compose
+- Access to ports 4001, 4002, 4003, 9092, and 27017
 
-- Add dead-letter queue and retry topics.
-- Add OpenTelemetry tracing and metrics.
-- Add auth and RBAC.
-- Add event schema registry and validation.
-- Add streaming analytics and dashboarding.
+---
 
-## 9. Minimal runnable example
+## Environment variables
 
-The repository includes executable code for:
+The services read environment variables from the shell or Docker Compose environment.
 
-- API service: read logs at GET /api/v1/activity-logs
-- Producer service: POST /api/v1/activities
-- Processor service: consumes events and writes to MongoDB
+For local manual execution, use values like:
 
-## 10. Notes on stack choices
+```bash
+export KAFKA_BROKERS=localhost:9092
+export MONGODB_URI=mongodb://admin:password@localhost:27017/activity_platform?authSource=admin
+export API_PORT=3001
+export PRODUCER_PORT=3002
+export PROCESSOR_PORT=3003
+```
 
-- Node.js + Express is suitable for rapid service implementation and easy Kafka integration.
-- Kafka is used for asynchronous, resilient event distribution.
-- MongoDB is chosen because the workload is mostly event-based reads and flexible JSON documents.
-- This stack is a solid MVP and can be upgraded with EventStore, Postgres, or a dedicated search layer later.
+For Docker Compose, these values are already configured inside `docker-compose.yml`.
+
+---
+
+## Quick start with Docker Compose
+
+From the project root, run:
+
+```bash
+npm install
+npm run docker:up
+```
+
+This starts:
+
+- Kafka
+- MongoDB
+- Activity producer
+- Activity processor
+- Activity API
+
+To stop everything:
+
+```bash
+npm run docker:down
+```
+
+---
+
+## Running the services manually
+
+If you want to run each service individually, open separate terminals and use:
+
+### 1) Start the producer
+
+```bash
+export KAFKA_BROKERS=localhost:9092
+export PRODUCER_PORT=3002
+npm run producer
+```
+
+### 2) Start the processor
+
+```bash
+export KAFKA_BROKERS=localhost:9092
+export MONGODB_URI=mongodb://admin:password@localhost:27017/activity_platform?authSource=admin
+export PROCESSOR_PORT=3003
+npm run processor
+```
+
+### 3) Start the API
+
+```bash
+export MONGODB_URI=mongodb://admin:password@localhost:27017/activity_platform?authSource=admin
+export API_PORT=3001
+npm run api
+```
+
+> The Kafka broker and MongoDB must be running before the processor and API start successfully.
+
+---
+
+## Health checks
+
+Each service exposes a basic health endpoint:
+
+- Producer: `GET /health`
+- Processor: `GET /health`
+- API: `GET /health`
+
+Example:
+
+```bash
+curl http://localhost:3001/health
+curl http://localhost:3002/health
+curl http://localhost:3003/health
+```
+
+---
+
+## API usage
+
+### 1) Create an activity event
+
+Endpoint:
+
+```http
+POST /api/v1/activities
+```
+
+Example request:
+
+```bash
+curl -X POST http://localhost:3002/api/v1/activities \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "activityType": "login",
+    "source": "web",
+    "metadata": {
+      "ip": "127.0.0.1",
+      "device": "desktop"
+    }
+  }'
+```
+
+Example success response:
+
+```json
+{
+  "message": "activity accepted",
+  "eventId": "7b0f...",
+  "activityType": "login"
+}
+```
+
+This request is validated by Joi and then sent to Kafka.
+
+### 2) Query activity logs
+
+Endpoint:
+
+```http
+GET /api/v1/activity-logs
+```
+
+Example request:
+
+```bash
+curl "http://localhost:3001/api/v1/activity-logs?page=1&size=20&userId=user-123&activityType=login&sort=-timestamp"
+```
+
+Optional filters:
+
+- `page` – page number, default `1`
+- `size` – page size, default `20`, max `100`
+- `userId` – filter by user ID
+- `activityType` – filter by activity type
+- `startDate` – ISO date to filter from
+- `endDate` – ISO date to filter until
+- `sort` – such as `-timestamp` or `userId`
+- `fields` – comma-separated field list
+
+Example:
+
+```bash
+curl "http://localhost:3001/api/v1/activity-logs?userId=user-123&activityType=login&startDate=2026-01-01&endDate=2026-12-31&sort=-timestamp&fields=userId,activityType,timestamp"
+```
+
+---
+
+## Kafka and MongoDB behavior
+
+### Kafka flow
+
+The producer sends messages to the `user-activity` topic. The processor consumes from the same topic using a consumer group named `activity-processor`.
+
+### MongoDB storage
+
+Each processed record contains:
+
+- `eventId`
+- `userId`
+- `activityType`
+- `timestamp`
+- `source`
+- `metadata`
+- `status`
+- `expiresAt`
+
+The repository also creates indexes to improve querying speed, including:
+
+- user ID
+- activity type
+- timestamp
+- compound query index on `userId + activityType + timestamp`
+
+---
+
+## Notes about the implementation
+
+This project is intentionally a lightweight MVP, not a production-grade platform. It is designed to demonstrate the full flow of:
+
+- event ingestion
+- Kafka-based messaging
+- consumer-side processing
+- persistence in MongoDB
+- read API and query support
+
+It includes basic validation and idempotency checks, but a production system would normally add:
+
+- authentication and authorization
+- retries and DLQ handling
+- OpenTelemetry tracing
+- proper observability and metrics
+- more robust configuration management
+
+---
+
+## Useful commands
+
+```bash
+npm install
+npm run docker:up
+npm run docker:down
+npm run producer
+npm run processor
+npm run api
+```
+
+---
+
+## Summary
+
+This task is a working example of a small event-driven activity pipeline. It shows how an application can accept events, publish them to Kafka, process them asynchronously, store them in MongoDB, and expose them through a query API.
+
+If you want to test the flow end-to-end, run Docker Compose, send a `POST` to the producer, and then query the API to see the saved activity log.
