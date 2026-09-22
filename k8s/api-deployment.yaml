@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-api
+  namespace: eyego-activity
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: activity-api
+  template:
+    metadata:
+      labels:
+        app: activity-api
+    spec:
+      containers:
+        - name: activity-api
+          image: eyego/activity-api:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: eyego-config
+            - secretRef:
+                name: eyego-secrets
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: activity-api
+  namespace: eyego-activity
+spec:
+  selector:
+    app: activity-api
+  ports:
+    - port: 80
+      targetPort: 3001
+  type: LoadBalancer

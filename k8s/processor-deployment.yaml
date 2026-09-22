@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: activity-processor
+  namespace: eyego-activity
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: activity-processor
+  template:
+    metadata:
+      labels:
+        app: activity-processor
+    spec:
+      containers:
+        - name: activity-processor
+          image: eyego/activity-processor:latest
+          envFrom:
+            - configMapRef:
+                name: eyego-config
+            - secretRef:
+                name: eyego-secrets
+          resources:
+            requests:
+              cpu: 300m
+              memory: 384Mi
+            limits:
+              cpu: 750m
+              memory: 768Mi
